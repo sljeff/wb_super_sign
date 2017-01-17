@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博超级话题签到
 // @namespace    https://www.kindjeff.com/
-// @version      2017.1.5
+// @version      2017.1.17
 // @description  在网页端自己的微博主页，把自己关注的超级话题一键全部签到。注意：只能在自己的个人主页签到。
 // @author       kindJeff
 // @match        http://weibo.com/*
@@ -38,47 +38,81 @@
         return result;
     }
 
-    function sign(one_hash){
+    function sign(one_hash, name, retry_time){
         var xmlhttp_sign = new XMLHttpRequest();
         var s1 = "http://weibo.com/p/aj/general/button";
         var s2 = "?ajwvr=6&api=http://i.huati.weibo.com/aj/supercheckin&texta=%E7%AD%BE%E5%88%B0&textb=%E5%B7%B2%E7%AD%BE%E5%88%B0&status=0&id=";
         var url = s1 + s2 + one_hash + "&location=page_100808_super_index";
-        xmlhttp_sign.open("GET", url, false);
+        xmlhttp_sign.open("GET", url, true);
+
+        var re_sign = function(info){
+            if(retry_time===undefined)
+                retry_time = 0;
+            retry_time += 1;
+
+            if(retry_time<=5){
+                setTimeout(sign, retry_time*500, one_hash, name, retry_time);
+            }else{
+                log_result(name, info);
+            }
+        };
+
+        xmlhttp_sign.timeout = 3000;
+        xmlhttp_sign.ontimeout = function(){
+            re_sign('签到失败');
+        };
+
+        xmlhttp_sign.onreadystatechange = function(){
+            if(xmlhttp_sign.readyState==4 && xmlhttp_sign.status==200){
+                var sign_result_str = xmlhttp_sign.responseText;
+                var sign_result_obj = JSON.parse(sign_result_str);
+                var info = sign_result_obj['data']['alert_title'];
+                if(sign_result_obj['code']!='100000'){
+                    re_sign(sign_result_obj['msg']);
+                }else{
+                    log_result(name, info);
+                }
+            }
+        };
+
+        xmlhttp_sign.onerror = function(){
+            re_sign('签到失败');
+        };
+
         xmlhttp_sign.send();
-        var sign_result_str = xmlhttp_sign.responseText;
-        var sign_result_obj = JSON.parse(sign_result_str);
-        var info = sign_result_obj['data']['alert_title'];
-        if(sign_result_obj['code']!='100000'){
-            info = sign_result_obj['msg'];
-        }
-        return info;
     }
 
-    function log_result(result_obj){
-        // console.log(result_obj);
-        for(var name in result_obj){
-            console.log(name, result_obj[name]);
-        }
-        var s_b = document.getElementById("super_sign");
-        s_b.innerText = "完成，按F12看结果";
+    function log_result(name, result){
+        console.log(name, result);
     }
 
-    function get_and_sign(){
+    function get_and_sign(retry_time){
         var user_id = document.getElementsByClassName('tab_link')[0].href.split('/')[4];
         var xmlhttp_get_list = new XMLHttpRequest();
+
+        xmlhttp_get_list.open('GET', 'http://weibo.com/p/'+user_id+'/myfollow?relate=interested&pids=plc_main&ajaxpagelet=1&ajaxpagelet_v6=1&__ref=%2Fp%2F'+user_id+'%2Fmyfollow%3Frelate%3Dinterested%23place', true);
 
         xmlhttp_get_list.onreadystatechange = function(){
             if(xmlhttp_get_list.readyState==4 && xmlhttp_get_list.status==200){
                 var topic_hash = get_topic_hash(xmlhttp_get_list.responseText, 1, user_id);
-                var sign_result = {};
                 for(var name in topic_hash){
-                    sign_result[name] = sign(topic_hash[name]);
+                    sign(topic_hash[name], name);
                 }
-                log_result(sign_result);
+                var s_b = document.getElementById("super_sign");
+                s_b.innerText = "按F12看结果";
             }
         };
 
-        xmlhttp_get_list.open('GET', 'http://weibo.com/p/'+user_id+'/myfollow?relate=interested&pids=plc_main&ajaxpagelet=1&ajaxpagelet_v6=1&__ref=%2Fp%2F'+user_id+'%2Fmyfollow%3Frelate%3Dinterested%23place', true);
+        xmlhttp_get_list.onerror = function(){
+            if(retry_time===undefined)
+                retry_time = 0;
+            retry_time += 1;
+
+            if(retry_time<=5){
+                setTimeout(get_and_sign, retry_time*500, retry_time);
+            }
+        };
+
         xmlhttp_get_list.send();
     }
 
